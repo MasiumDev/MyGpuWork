@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
+using System.Threading.Tasks;
 using Dapper;
 using ILGPU;
 using ILGPU.Runtime;
@@ -12,6 +14,8 @@ namespace MyGpuWork
 {
     class Program
     {
+        static Accelerator gpu;
+
         static void Main(string[] args)
         {
             SqlMapper.AddTypeHandler(new MmtpNumberTypeHandler());
@@ -39,58 +43,124 @@ namespace MyGpuWork
                        return a4;
                    }, splitOn: "Id,CIdAdh").ToList();
 
-                //var gA3 = A3.Select(x =>new
-                //{
-                //    x.Id,
-                //    x.Header.InstrumentID,
-                //    x.AIdOm.DSaiOm,
-                //    x.AIdOm.NSeqOm
-                //}).ToColumn();
+                var gA3 = A3.Where(x => x.Header.InstrumentID == "IRO1FOLD0001").Select(x => new A3
+                {
+                    Id = x.Id,
+                    InstrumentId = x.Header.InstrumentID.ToHash(),
+                    DSaiOm = int.Parse(x.AIdOm.DSaiOm),
+                    NSeqOm = int.Parse(x.AIdOm.NSeqOm)
+                }).ToArray();
 
-                var gA3 = A3.Select(x => new { instrumentId = x.Header.InstrumentID.ToHash(), x.AIdOm.NSeqOm }).To2DArray();
+                var gA4 = A4.Where(x => x.Header.InstrumentID == "IRO1FOLD0001").Select(x => new A4
+                {
+                    Id = x.Id,
+                    InstrumentId = x.Header.InstrumentID.ToHash(),
+                    DSaiOm = int.Parse(x.AIdOm.DSaiOm),
+                    NSeqOm = int.Parse(x.AIdOm.NSeqOm)
+                }).ToArray();
 
-                var gpu = Accelerator.Create(new Context(), Accelerator.Accelerators.First(a => a.AcceleratorType == AcceleratorType.Cuda));
-                var kernel = gpu.LoadAutoGroupedStreamKernel<Index2, ArrayView2D<int>>(ApplyKernel);
 
-                var result = Run(gpu, gA3, kernel);
+                var watch = new Stopwatch();
 
+
+                gpu = Accelerator.Create(new Context(), Accelerator.Accelerators.First(a => a.AcceleratorType == AcceleratorType.Cuda));
+                var kernel = gpu.LoadAutoGroupedStreamKernel<Index, ArrayView<A3>, ArrayView<A4>>(ApplyKernel);
+
+
+                Console.WriteLine("Warming up GPU...");
+                WarmUp();
+
+
+                Console.WriteLine($"Run");
+                watch.Start();
+
+                var result = Run(gpu, gA3, gA4, kernel);
+
+                var final = result.Where(x => x.Id != 0).ToList();
+
+                watch.Stop();
+
+                Console.WriteLine($"elapsed: {watch.ElapsedMilliseconds}");
+
+                //watch.Restart();
+                //var serial =  gA3.AsParallel().Where(a3 => !gA4.AsParallel().Any(a4 =>
+                //    a4.InstrumentId == a3.InstrumentId && a4.DSaiOm == a3.DSaiOm && a4.NSeqOm == a3.NSeqOm &&
+                //    a4.Id > a3.Id)).ToList();
+                //watch.Stop();
+
+                //Console.WriteLine($"cpu: {watch.ElapsedMilliseconds}");
             }
 
+            Console.ReadLine();
         }
 
-        private static int[,] Run(Accelerator gpu, int[,] gA3, Action<Index2, ArrayView2D<int>> kernel)
+        private static A3[] Run(Accelerator gpu, A3[] gA3, A4[] gA4, Action<Index, ArrayView<A3>, ArrayView<A4>> kernel)
         {
-            using (MemoryBuffer2D<int> buffer = gpu.Allocate<int>(gA3.GetLength(0), gA3.GetLength(1)))
-            {
-                buffer.CopyFrom(gA3, Index2.Zero, Index2.Zero, new Index2(gA3.GetLength(0), gA3.GetLength(1)));
+            Console.WriteLine($"Start Copy");
 
-                kernel(new Index2(gA3.GetLength(0), gA3.GetLength(1)), buffer.View);
+            var watch = new Stopwatch();
+            watch.Start();
+            using (MemoryBuffer<A3> a3buffer = gpu.Allocate<A3>(gA3.Length))
+            using (MemoryBuffer<A4> a4buffer = gpu.Allocate<A4>(gA4.Length))
+            {
+                a3buffer.CopyFrom(gA3, 0, Index.Zero, a3buffer.Extent);
+                a4buffer.CopyFrom(gA4, 0, Index.Zero, a4buffer.Extent);
+                Console.WriteLine($"copy: {watch.ElapsedMilliseconds}");
+
+                watch.Restart();
+                kernel(a3buffer.Extent, a3buffer.View, a4buffer.View);
 
                 // Wait for the kernel to finish...
                 gpu.Synchronize();
 
-                return buffer.GetAs2DArray();
+
+                var asArray = a3buffer.GetAsArray();
+                watch.Stop();
+                Console.WriteLine($"Process: {watch.ElapsedMilliseconds}");
+
+                return asArray;
             }
         }
 
-        private static void ApplyKernel(
-            Index2 index, /* The global thread index (1D in this case) */
-            ArrayView2D<int> array /* A view to a chunk of memory (1D in this case)*/)
+        private static void ApplyKernel(Index index, ArrayView<A3> a3, ArrayView<A4> a4)
         {
-            array[index] = Process(array[index]);
+            a3[index] = Process(a3[index], a4);
         }
 
-        private static int Process(int value)
+        private static A3 Process(A3 a3, ArrayView<A4> a4s)
         {
-            for (long i = 0; i < 500000; i++)
+            for (int i = 0; i < a4s.Length; i++)
             {
-                var a = value != 664890191;
+                var a4 = a4s[i];
+
+                if (a4.InstrumentId == a3.InstrumentId && a4.DSaiOm == a3.DSaiOm && a4.NSeqOm == a3.NSeqOm && a4.Id > a3.Id)
+                    return new A3();
             }
 
-            if (value != 664890191)
-                return 0;
+            return a3;
+        }
 
-            return 1;
+        public static void ApplyWarmUp(Index index, ArrayView<int> arrayView)
+        {
+            arrayView[index] = arrayView[index] * 2;
+        }
+
+        public static void WarmUp()
+        {
+            var pixelArray = new int[10];
+
+            using (MemoryBuffer<int> buffer = gpu.Allocate<int>(pixelArray.Length))
+            {
+                buffer.CopyFrom(pixelArray, 0, Index.Zero, pixelArray.Length);
+
+                var ker = gpu.LoadAutoGroupedStreamKernel<Index, ArrayView<int>>(ApplyWarmUp);
+
+                ker(buffer.Length, buffer.View);
+
+                // Wait for the kernel to finish...
+                gpu.Synchronize();
+
+            }
         }
     }
 }
