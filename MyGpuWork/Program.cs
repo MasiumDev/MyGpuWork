@@ -48,8 +48,13 @@ namespace MyGpuWork
                     Id = x.Id,
                     InstrumentId = x.Header.InstrumentID.ToHash(),
                     DSaiOm = int.Parse(x.AIdOm.DSaiOm),
-                    NSeqOm = int.Parse(x.AIdOm.NSeqOm)
+                    NSeqOm = int.Parse(x.AIdOm.NSeqOm),
                 }).ToArray();
+                for (int i = 0; i < gA3.Length; i++)
+                {
+                    gA3[i].Hash = gA3[i].InstrumentId + gA3[i].DSaiOm + gA3[i].NSeqOm;
+                }
+
 
                 var gA4 = A4.Where(x => x.Header.InstrumentID == "IRO1FOLD0001").Select(x => new A4
                 {
@@ -58,7 +63,10 @@ namespace MyGpuWork
                     DSaiOm = int.Parse(x.AIdOm.DSaiOm),
                     NSeqOm = int.Parse(x.AIdOm.NSeqOm)
                 }).ToArray();
-
+                for (int i = 0; i < gA4.Length; i++)
+                {
+                    gA4[i].Hash = gA4[i].InstrumentId + gA4[i].DSaiOm + gA4[i].NSeqOm;
+                }
 
                 var watch = new Stopwatch();
 
@@ -76,7 +84,7 @@ namespace MyGpuWork
 
                 var result = Run(gpu, gA3, gA4, kernel);
 
-                var final = result.Where(x => x.Id != 0).ToList();
+                var final = result.AsParallel().Where(x => x.Id != 0).ToList();
 
                 watch.Stop();
 
@@ -133,7 +141,7 @@ namespace MyGpuWork
             {
                 var a4 = a4s[i];
 
-                if (a4.InstrumentId == a3.InstrumentId && a4.DSaiOm == a3.DSaiOm && a4.NSeqOm == a3.NSeqOm && a4.Id > a3.Id)
+                if (a4.Hash == a3.Hash && a4.Id > a3.Id)
                     return new A3();
             }
 
