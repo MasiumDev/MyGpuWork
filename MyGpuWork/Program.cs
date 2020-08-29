@@ -8,7 +8,6 @@ using ILGPU;
 using ILGPU.Runtime;
 using Microsoft.Data.SqlClient;
 using MyGpuWork.Models;
-using Index = ILGPU.Index;
 
 namespace MyGpuWork
 {
@@ -52,7 +51,7 @@ namespace MyGpuWork
                 }).ToArray();
                 for (int i = 0; i < gA3.Length; i++)
                 {
-                    gA3[i].Hash = gA3[i].InstrumentId + gA3[i].DSaiOm + gA3[i].NSeqOm;
+                    gA3[i].Hash = long.Parse($"{gA3[i].DSaiOm}{gA3[i].NSeqOm}");
                 }
 
 
@@ -65,14 +64,14 @@ namespace MyGpuWork
                 }).ToArray();
                 for (int i = 0; i < gA4.Length; i++)
                 {
-                    gA4[i].Hash = gA4[i].InstrumentId + gA4[i].DSaiOm + gA4[i].NSeqOm;
+                    gA4[i].Hash = long.Parse($"{gA4[i].DSaiOm}{gA4[i].NSeqOm}");
                 }
 
                 var watch = new Stopwatch();
 
 
                 gpu = Accelerator.Create(new Context(), Accelerator.Accelerators.First(a => a.AcceleratorType == AcceleratorType.Cuda));
-                var kernel = gpu.LoadAutoGroupedStreamKernel<Index, ArrayView<A3>, ArrayView<A4>>(ApplyKernel);
+                var kernel = gpu.LoadAutoGroupedStreamKernel<Index1, ArrayView<A3>, ArrayView<A4>>(ApplyKernel);
 
 
                 Console.WriteLine("Warming up GPU...");
@@ -84,11 +83,10 @@ namespace MyGpuWork
 
                 var result = Run(gpu, gA3, gA4, kernel);
 
-                var final = result.AsParallel().Where(x => x.Id != 0).ToList();
-
                 watch.Stop();
-
                 Console.WriteLine($"elapsed: {watch.ElapsedMilliseconds}");
+
+                var final = result.Where(x => x.Id != 0).ToList();
 
                 //watch.Restart();
                 //var serial =  gA3.AsParallel().Where(a3 => !gA4.AsParallel().Any(a4 =>
@@ -102,8 +100,11 @@ namespace MyGpuWork
             Console.ReadLine();
         }
 
-        private static A3[] Run(Accelerator gpu, A3[] gA3, A4[] gA4, Action<Index, ArrayView<A3>, ArrayView<A4>> kernel)
+        private static A3[] Run(Accelerator gpu, A3[] gA3, A4[] gA4, Action<Index1, ArrayView<A3>, ArrayView<A4>> kernel)
         {
+            Console.WriteLine($"A3: {gA3.Length}");
+            Console.WriteLine($"A4: {gA4.Length}");
+
             Console.WriteLine($"Start Copy");
 
             var watch = new Stopwatch();
@@ -111,12 +112,12 @@ namespace MyGpuWork
             using (MemoryBuffer<A3> a3buffer = gpu.Allocate<A3>(gA3.Length))
             using (MemoryBuffer<A4> a4buffer = gpu.Allocate<A4>(gA4.Length))
             {
-                a3buffer.CopyFrom(gA3, 0, Index.Zero, a3buffer.Extent);
-                a4buffer.CopyFrom(gA4, 0, Index.Zero, a4buffer.Extent);
+                a3buffer.CopyFrom(gA3, 0, Index1.Zero, a3buffer.Extent);
+                a4buffer.CopyFrom(gA4, 0, Index1.Zero, a4buffer.Extent);
                 Console.WriteLine($"copy: {watch.ElapsedMilliseconds}");
 
                 watch.Restart();
-                kernel(a3buffer.Extent, a3buffer.View, a4buffer.View);
+                kernel(a3buffer.Length, a3buffer.View, a4buffer.View);
 
                 // Wait for the kernel to finish...
                 gpu.Synchronize();
@@ -130,7 +131,7 @@ namespace MyGpuWork
             }
         }
 
-        private static void ApplyKernel(Index index, ArrayView<A3> a3, ArrayView<A4> a4)
+        private static void ApplyKernel(Index1 index, ArrayView<A3> a3, ArrayView<A4> a4)
         {
             a3[index] = Process(a3[index], a4);
         }
@@ -148,7 +149,7 @@ namespace MyGpuWork
             return a3;
         }
 
-        public static void ApplyWarmUp(Index index, ArrayView<int> arrayView)
+        public static void ApplyWarmUp(Index1 index, ArrayView<int> arrayView)
         {
             arrayView[index] = arrayView[index] * 2;
         }
@@ -159,9 +160,9 @@ namespace MyGpuWork
 
             using (MemoryBuffer<int> buffer = gpu.Allocate<int>(pixelArray.Length))
             {
-                buffer.CopyFrom(pixelArray, 0, Index.Zero, pixelArray.Length);
+                buffer.CopyFrom(pixelArray, 0, Index1.Zero, pixelArray.Length);
 
-                var ker = gpu.LoadAutoGroupedStreamKernel<Index, ArrayView<int>>(ApplyWarmUp);
+                var ker = gpu.LoadAutoGroupedStreamKernel<Index1, ArrayView<int>>(ApplyWarmUp);
 
                 ker(buffer.Length, buffer.View);
 

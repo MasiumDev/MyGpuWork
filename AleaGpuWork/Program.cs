@@ -79,16 +79,20 @@ namespace AleaGpuWork
                          var a4 = gA4[i];
 
                          if (a4.InstrumentId == a3.InstrumentId && a4.DSaiOm == a3.DSaiOm && a4.NSeqOm == a3.NSeqOm && a4.Id > a3.Id)
+                         {
                              cpuResult[x] = new A3();
+                             break;
+                         }
                         
                      }
 
                  });
                 watch.Stop();
+                Console.WriteLine($"Elapsed: {watch.ElapsedMilliseconds}");
 
                 var final = cpuResult.Where(x => x.Id != 0).ToList();
 
-                Console.WriteLine($"Elapsed: {watch.ElapsedMilliseconds}");
+                Console.ReadLine();
             }
         }
     }

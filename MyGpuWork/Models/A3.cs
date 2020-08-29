@@ -6,7 +6,7 @@
         public int InstrumentId { get; set; }
         public int NSeqOm { get; set; }
         public int DSaiOm { get; set; }
-        public int Hash { get; set; }
+        public long Hash { get; set; }
     }
 
     public struct A4
@@ -15,6 +15,6 @@
         public int InstrumentId { get; set; }
         public int NSeqOm { get; set; }
         public int DSaiOm { get; set; }
-        public int Hash { get; set; }
+        public long Hash { get; set; }
     }
 }
